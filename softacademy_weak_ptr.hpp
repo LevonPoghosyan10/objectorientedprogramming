@@ -2,48 +2,135 @@
 #define SOFTACADEMY_WEAK_PTR_HPP
 
 #include <cstddef>
+#include <utility>
 
 namespace softacademy {
 
-template <typename T> class SharedPtr;
+    template <typename T>
+    class SharedPtr;
 
-namespace detail {
-struct ControlBlock;
+    namespace detail {
+
+        struct ControlBlock {
+            void* ptr;
+            std::size_t strong_count;
+            std::size_t weak_count;
+            void (*deleter)(void*);
+
+            ControlBlock(void* p, void (*d)(void*))
+                : ptr(p), strong_count(1), weak_count(0), deleter(d) {}
+        };
+
+        template <typename U>
+        void default_delete(void* p) {
+            delete static_cast<U*>(p);
+        }
+
+    }
+
+    template <typename T>
+    class WeakPtr {
+    public:
+        WeakPtr() noexcept
+            : m_ptr(nullptr), m_control(nullptr) {}
+
+        WeakPtr(const SharedPtr<T>& sp) noexcept
+            : m_ptr(sp.m_ptr), m_control(sp.m_control) {
+            inc_weak();
+        }
+
+        WeakPtr(const WeakPtr& other) noexcept
+            : m_ptr(other.m_ptr), m_control(other.m_control) {
+            inc_weak();
+        }
+
+        WeakPtr(WeakPtr&& other) noexcept
+            : m_ptr(other.m_ptr), m_control(other.m_control) {
+            other.m_ptr = nullptr;
+            other.m_control = nullptr;
+        }
+
+        WeakPtr& operator=(const WeakPtr& other) {
+            if (this != &other) {
+                reset();
+                m_ptr = other.m_ptr;
+                m_control = other.m_control;
+                inc_weak();
+            }
+            return *this;
+        }
+
+        WeakPtr& operator=(WeakPtr&& other) noexcept {
+            if (this != &other) {
+                reset();
+                m_ptr = other.m_ptr;
+                m_control = other.m_control;
+                other.m_ptr = nullptr;
+                other.m_control = nullptr;
+            }
+            return *this;
+        }
+
+        WeakPtr& operator=(const SharedPtr<T>& sp) noexcept {
+            reset();
+            m_ptr = sp.m_ptr;
+            m_control = sp.m_control;
+            inc_weak();
+            return *this;
+        }
+
+        ~WeakPtr() {
+            reset();
+        }
+
+        std::size_t use_count() const noexcept {
+            return m_control ? m_control->strong_count : 0;
+        }
+
+        bool expired() const noexcept {
+            return use_count() == 0;
+        }
+
+        SharedPtr<T> lock() const noexcept {
+            if (!expired()) {
+                return SharedPtr<T>(*this);
+            }
+            else {
+                return SharedPtr<T>();
+            }
+        }
+
+        void reset() noexcept {
+            dec_weak();
+            m_ptr = nullptr;
+            m_control = nullptr;
+        }
+
+        void swap(WeakPtr& other) noexcept {
+            std::swap(m_ptr, other.m_ptr);
+            std::swap(m_control, other.m_control);
+        }
+
+    private:
+        T* m_ptr;
+        detail::ControlBlock* m_control;
+
+        void inc_weak() noexcept {
+            if (m_control) ++m_control->weak_count;
+        }
+
+        void dec_weak() noexcept {
+            if (!m_control) return;
+            if (m_control->weak_count > 0) --m_control->weak_count;
+            if (m_control->strong_count == 0 && m_control->weak_count == 0) {
+                delete m_control;
+                m_control = nullptr;
+            }
+        }
+
+        friend class SharedPtr<T>;
+    };
+
 }
-
-template <typename T>
-class WeakPtr {
-public:
-    WeakPtr() noexcept;
-    WeakPtr(const SharedPtr<T>& sp) noexcept;
-
-    WeakPtr(const WeakPtr& other) noexcept;
-    WeakPtr(WeakPtr&& other) noexcept;
-
-    WeakPtr& operator=(const WeakPtr& other) noexcept;
-    WeakPtr& operator=(WeakPtr&& other) noexcept;
-    WeakPtr& operator=(const SharedPtr<T>& sp) noexcept;
-
-    ~WeakPtr();
-
-    std::size_t use_count() const noexcept;
-    bool expired() const noexcept;
-
-    SharedPtr<T> lock() const noexcept;
-
-    void reset() noexcept;
-    void swap(WeakPtr& other) noexcept;
-
-private:
-    T* ptr_;
-    detail::ControlBlock* control_;
-
-    void inc_weak() noexcept;
-    void dec_weak() noexcept;
-
-    friend class SharedPtr<T>;
-};
-
-} // namespace softacademy
 
 #endif
